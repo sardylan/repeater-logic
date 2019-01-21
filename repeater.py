@@ -1,5 +1,6 @@
 import datetime
 import logging
+import threading
 import time
 from enum import Enum
 
@@ -41,6 +42,8 @@ class State(Enum):
 
 class Repeater:
     def __init__(self):
+        self._thread_beacon_trigger = None
+
         self._state = State.OFF
 
         self._rx_local = False
@@ -55,13 +58,15 @@ class Repeater:
 
     def run(self):
         self._register_gpio()
+        self._prepare_beacon_thread()
 
         self._state = State.INIT
 
         while True:
             self._loop()
 
-            print("Local: %s %s - Remote: %s %s - Beacon: %s - State: %s" % (
+            print("%s | Local: %s %s - Remote: %s %s - Beacon: %s - State: %s" % (
+                datetime.datetime.now(),
                 ">RX<" if GPIO.input(PIN_RX_LOCAL) == GPIO.LOW else " rx ",
                 ">TX<" if GPIO.input(PIN_TX_LOCAL) == GPIO.HIGH else " tx ",
                 ">RX<" if GPIO.input(PIN_RX_REMOTE) == GPIO.LOW else " rx ",
@@ -82,15 +87,15 @@ class Repeater:
         GPIO.setup(channel=PIN_TX_LOCAL, direction=GPIO.OUT, pull_up_down=GPIO.PUD_OFF, initial=GPIO.LOW)
         GPIO.setup(channel=PIN_TX_REMOTE, direction=GPIO.OUT, pull_up_down=GPIO.PUD_OFF, initial=GPIO.LOW)
 
-        # GPIO.add_event_detect(gpio=PIN_RX_LOCAL, edge=GPIO.FALLING, callback=self._trigger, bouncetime=250)
-        # GPIO.add_event_detect(gpio=PIN_RX_LOCAL, edge=GPIO.RISING, callback=self._trigger, bouncetime=250)
-        # GPIO.add_event_detect(gpio=PIN_RX_REMOTE, edge=GPIO.FALLING, callback=self._trigger, bouncetime=250)
-        # GPIO.add_event_detect(gpio=PIN_RX_REMOTE, edge=GPIO.RISING, callback=self._trigger, bouncetime=250)
+    def _prepare_beacon_thread(self):
+        self._thread_beacon_trigger = threading.Thread(target=self._thread_beacon_loop)
+        self._thread_beacon_trigger.daemon = True
+        self._thread_beacon_trigger.start()
 
-    def _trigger(self, channel):
-        _logger.info("Event trigger: %s", channel)
-
-        self._loop()
+    def _thread_beacon_loop(self):
+        while self._thread_beacon_trigger.is_alive():
+            time.sleep(10)
+            self._beacon_time = True
 
     def _loop(self):
         _logger.info("Running loop")
@@ -165,6 +170,7 @@ class Repeater:
         elif self._state == State.BEACON:
             self._tx_local = True
             self._tx_remote = False
+            self._beacon_play_start()
 
         elif self._state == State.DEINIT:
             self._tx_local = False
@@ -188,6 +194,13 @@ class Repeater:
 
         if self._tx_remote != bool(GPIO.input(PIN_TX_REMOTE) == GPIO.HIGH):
             GPIO.output(PIN_TX_REMOTE, self._tx_remote)
+
+    def _beacon_play_start(self):
+        threading.Thread(target=self._beacon_play).start()
+
+    def _beacon_play(self):
+        time.sleep(3)
+        self._beacon_time = False
 
     @staticmethod
     def _set_tx_pin(pin, value):
